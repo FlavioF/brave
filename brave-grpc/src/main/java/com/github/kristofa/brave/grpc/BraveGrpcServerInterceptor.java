@@ -54,8 +54,10 @@ public final class BraveGrpcServerInterceptor implements ServerInterceptor {
     private final ServerRequestInterceptor serverRequestInterceptor;
     private final ServerResponseInterceptor serverResponseInterceptor;
     private final MaybeAddClientAddressFromAttributes maybeAddClientAddressFromAttributes;
+    private final Brave brave;
 
     BraveGrpcServerInterceptor(Builder b) { // intentionally hidden
+        this.brave = b.brave;
         this.serverRequestInterceptor = b.brave.serverRequestInterceptor();
         this.serverResponseInterceptor = b.brave.serverResponseInterceptor();
         this.maybeAddClientAddressFromAttributes = new MaybeAddClientAddressFromAttributes(b.brave);
@@ -72,16 +74,22 @@ public final class BraveGrpcServerInterceptor implements ServerInterceptor {
     @Override
     public <ReqT, RespT> Listener<ReqT> interceptCall(final ServerCall<ReqT, RespT> call, final Metadata requestHeaders,
                                                       final ServerCallHandler<ReqT, RespT> next) {
+
         return next.startCall(new SimpleForwardingServerCall<ReqT, RespT>(call) {
+
+            ServerSpan span;
+
             @Override
             public void request(int numMessages) {
                 serverRequestInterceptor.handle(new GrpcServerRequestAdapter<>(call, requestHeaders));
                 maybeAddClientAddressFromAttributes.accept(call.attributes());
                 super.request(numMessages);
+                span = brave.serverSpanThreadBinder().getCurrentServerSpan();
             }
 
             @Override
             public void close(Status status, Metadata trailers) {
+                brave.serverSpanThreadBinder().setCurrentSpan(span);
                 serverResponseInterceptor.handle(new GrpcServerResponseAdapter(status));
                 super.close(status, trailers);
             }
